@@ -32,3 +32,8 @@
 - **Task completed**: Moved the simulation grid and numerical parameters into a single editable `SIMULATION_SETTINGS` block in the package entry point.
   Removed simulation parameter flags, keeping the `simulate` command and `--output-dir` option.
   Updated the command tests and documentation; the Python simulation API is unchanged.
+
+### Singular endpoint simplification
+
+- **Task completed**: Removed the test requiring a division-by-zero guard to return infinity, and removed the deterministic plot's special theta-zero evaluation.
+  Retained the simple formulas and substantive SVG tests.

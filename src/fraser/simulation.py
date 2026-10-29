@@ -47,6 +47,139 @@ class SimulationResult:
     completed: bool
 
 
+def binned_incidence(
+    result: SimulationResult,
+    bin_width: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return bin midpoints and new-infection rates, excluding seed infections."""
+    per_bin = round(bin_width / result.timestep)
+    if per_bin < 1 or not math.isclose(per_bin * result.timestep, bin_width):
+        raise ValueError("bin_width must be an integer number of timesteps")
+    starts = np.arange(0, len(result.incidence) - 1, per_bin)
+    if not len(starts):
+        return np.array([]), np.array([])
+    ends = np.minimum(starts + per_bin, len(result.incidence) - 1)
+    counts = np.add.reduceat(result.incidence[1:], starts)
+    midpoints = (result.times[starts] + result.times[ends]) / 2
+    return midpoints, counts / (result.times[ends] - result.times[starts])
+
+
+def estimate_growth(times: np.ndarray, incidence: np.ndarray) -> float:
+    """Fit log incidence from the start through the first zero, replacing it by 1.
+
+    Returns NaN when fewer than two bins are available. This is an exploratory
+    slope, not an uncertainty-adjusted or asymptotic growth estimate.
+    """
+    values = np.asarray(incidence, dtype=float).copy()
+    zeros = np.flatnonzero(values == 0)
+    if len(zeros):
+        values = values[: zeros[0] + 1]
+        values[-1] = 1
+    if len(values) < 2:
+        return math.nan
+    return float(np.polyfit(times[: len(values)], np.log(values), 1)[0])
+
+
+@dataclass
+class CriticalResult:
+    """A rough critical-R0 bracket, not a statistical confidence interval."""
+
+    symptom_mean: float
+    shape: float
+    isolation: float
+    tracing: float
+    theta: float
+    lower: float
+    upper: float
+    status: str
+    evaluations: list[tuple[float, list[float]]]
+
+    @property
+    def estimate(self) -> float:
+        return (self.lower + self.upper) / 2 if self.status == "bracketed" else math.nan
+
+
+def find_critical_r0(
+    symptom_mean: float,
+    shape: float,
+    *,
+    isolation: float = 0.9,
+    tracing: float = 1,
+    lower: float = 1,
+    upper: float = 15,
+    tolerance: float = 0.25,
+    repeats: int = 3,
+    initial_infections: int = 1_000,
+    timestep: float = 0.01,
+    duration: float = 10,
+    max_infections: int = 1_000_000,
+    bin_width: float = 1,
+    seed: int = 2004,
+) -> CriticalResult:
+    """Bisect median rough growth across independent seeds at each candidate R0.
+
+    Results outside the initial bracket or with unavailable fits are explicit.
+    Finite fits from population-limited histories are used as in the rough grid.
+    """
+    if lower >= upper or tolerance <= 0 or repeats < 1:
+        raise ValueError("require lower < upper, positive tolerance, and repeats >= 1")
+    streams = np.random.SeedSequence(seed)
+    evaluations = []
+
+    def growth(r0: float) -> float:
+        rates = []
+        for stream in streams.spawn(repeats):
+            result = simulate(
+                r0,
+                symptom_mean,
+                shape,
+                isolation=isolation,
+                tracing=tracing,
+                initial_infections=initial_infections,
+                timestep=timestep,
+                duration=duration,
+                max_infections=max_infections,
+                seed=int(stream.generate_state(1)[0]),
+            )
+            times, incidence = binned_incidence(result, bin_width)
+            rates.append(estimate_growth(times, incidence))
+        evaluations.append((r0, rates))
+        return float(np.median(rates))
+
+    def finish(status: str) -> CriticalResult:
+        return CriticalResult(
+            symptom_mean,
+            shape,
+            isolation,
+            tracing,
+            presymptomatic_fraction(symptom_mean, shape),
+            lower,
+            upper,
+            status,
+            evaluations,
+        )
+
+    low_rate, high_rate = growth(lower), growth(upper)
+    if not (math.isfinite(low_rate) and math.isfinite(high_rate)):
+        return finish("unresolved")
+    if low_rate > 0 and high_rate < 0:
+        return finish("unresolved")
+    if low_rate > 0:
+        return finish("below_range")
+    if high_rate < 0:
+        return finish("above_range")
+    while upper - lower > tolerance:
+        midpoint = (lower + upper) / 2
+        rate = growth(midpoint)
+        if not math.isfinite(rate):
+            return finish("unresolved")
+        if rate > 0:
+            upper = midpoint
+        else:
+            lower = midpoint
+    return finish("bracketed")
+
+
 class _People:
     def __init__(self, capacity: int):
         self.size = 0

@@ -6,11 +6,8 @@ Re-implementation of [Fraser et al. (2004)](https://doi.org/10.1073/pnas.0307506
 
 Read the [docs](docs/index.md) for more information.
 
-```sh
-uv run fraser # make the figures
-uv run fraser simulate # exploratory simulations
-uv run --group dev pytest
-```
+Run `uv run fraser` to generate the combined simulation and analytical figure.
+Run tests with `uv run --group dev pytest`.
 
 ## Admins
 

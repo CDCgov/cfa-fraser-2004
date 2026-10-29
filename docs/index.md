@@ -1,13 +1,13 @@
 # Re-implementation of Fraser et al. (2004)
 
-See [Fraser et al. (2004)](https://doi.org/10.1073/pnas.0307506101) for motivation and explanation of the math.
-This package implements the closed-form [deterministic equations](deterministic.md).
-The [stochastic simulator](simulation.md) produces exploratory incidence timecourses with isolation and tracing.
+Re-implementation of [Fraser et al. (2004)](https://doi.org/10.1073/pnas.0307506101), focused on Figure 3's outbreak-control thresholds.
+Run `uv run fraser` to search for critical R0 values and write the combined Altair SVG.
 
-## Results
+![Outbreak-control thresholds](figures/control.svg)
 
-![](figures/deterministic.svg)
+Panels show isolation efficacy 100%, 90%, and 75%.
+Blue/red curves simulate tracing for gamma shapes 10/2; bars show bisection brackets, not confidence intervals.
+Black is the exact isolation-only result (Equation 6); dashed gray is the exponential reference (corrected Equation 18).
+Gray rectangles show historical disease ranges.
 
-The solid black lines reproduce Figure 3's isolation-only thresholds.
-The dashed blue lines use corrected Equation 18, assuming independent isolation and tracing, exponential-distributed incubation, exponential-distributed infectiousness, and 100% tracing efficacy.
-Gray rectangles show the paper's historical disease ranges.
+See the [simulation methods](simulation.md) and [deterministic derivation and typo note](deterministic.md).

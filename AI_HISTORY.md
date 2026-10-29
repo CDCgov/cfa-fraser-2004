@@ -37,3 +37,31 @@
 
 - **Task completed**: Removed the test requiring a division-by-zero guard to return infinity, and removed the deterministic plot's special theta-zero evaluation.
   Retained the simple formulas and substantive SVG tests.
+
+### Rough growth-rate grid
+
+- **Task completed**: Added a simple log-incidence slope fit from the first bin through the first zero, replacing that zero with 1 and ignoring later bins.
+  Expanded the editable experiment to a 4-by-4 R0/symptom-mean grid for two gamma shapes and two policies.
+  Generated an annotated Altair growth-rate SVG with population-limit markers.
+  Kept seed infections separate from plotted incidence, documented the rough fitting rule, and added fitting/grid tests.
+
+### Critical-R0 search
+
+- **Task completed**: Added bisection over R0=1-15 at fixed symptom-onset mean and gamma shape.
+  Each candidate uses the median rough growth fit from three independent seeds; searches stop at a bracket width of 0.25.
+  Added explicit out-of-range and unresolved statuses, the `critical` command, editable search settings, and an Altair curve with numerical brackets (not confidence intervals).
+  Ran all 16 default searches and added search, command, and SVG tests.
+
+### Single-figure workflow
+
+- **Task completed**: Removed timecourse, growth-grid, and standalone deterministic plots and their command paths.
+  The default command now generates one simulation-led control figure with faint dashed analytical overlays and historical disease tiles.
+  Replaced the simulation walkthrough with concise methods, removed code examples, and updated documentation and plot tests.
+
+### Efficacy panels and theta coverage
+
+- **Task completed**: Switched the experiment to target theta values from 0.05 to 0.95, with inverse gamma calibration for symptom means and the forward computation retained in the simulator.
+  Panels now show isolation efficacies 100%, 90%, and 75%; blue/red distinguish simulated shapes 10/2.
+  Kept Equation 6 as a black analytical curve and Equation 18 as a dashed gray reference.
+  Eliminated isolation-only simulations and adopted faster preview settings: 300 seeds, timestep 0.02, and bracket tolerance 0.5.
+  Updated methods and tests.

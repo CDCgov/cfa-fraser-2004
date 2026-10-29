@@ -4,11 +4,22 @@ Re-implementation of [Fraser et al. (2004)](https://doi.org/10.1073/pnas.0307506
 
 ## Overview
 
-TBD
+Deterministic outbreak-control thresholds from Fraser et al.
+(2004), with minimal Altair SVGs.
+The solid isolation-only curves reproduce Figure 3's black lines.
+Dashed tracing curves show deterministic upper bounds from the paper's independent approximation, not its stochastic results.
+
+See [the documentation](docs/index.md), including [the Equation 16 calculation and Equation 18 typo](docs/deterministic.md) and [the future simulation protocol](docs/simulation.md).
 
 ## Getting started
 
-TBD
+```sh
+uv run fraser
+uv run --group dev pytest
+```
+
+The first command writes [the deterministic thresholds](docs/figures/deterministic.svg) and [the exponential benchmark](docs/figures/exponential.svg), with no notebook or HTML plot outputs.
+Use `--output-dir PATH` to choose another directory.
 
 ## Admins
 

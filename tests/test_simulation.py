@@ -2,9 +2,13 @@ import numpy as np
 import pytest
 from scipy.stats import gamma
 
+import fraser.simulation as simulation_module
 from fraser.simulation import (
     _People,
     _process_removals,
+    binned_incidence,
+    estimate_growth,
+    find_critical_r0,
     presymptomatic_fraction,
     simulate,
 )
@@ -160,3 +164,79 @@ def test_isolation_only_mean_matches_discrete_renewal(shape, isolation):
 def test_invalid_settings(kwargs):
     with pytest.raises(ValueError):
         simulate(1, 1, 2, **kwargs)
+
+
+def test_exponential_growth_fit():
+    times = np.arange(0.5, 10)
+    assert estimate_growth(times, 200 * np.exp(0.3 * times)) == pytest.approx(0.3)
+
+
+def test_growth_fit_includes_first_zero_as_one_and_ignores_later_bins():
+    times = np.arange(0.5, 4)
+    incidence = np.array([100, 10, 0, 1000])
+    assert estimate_growth(times, incidence) == pytest.approx(-np.log(10))
+    assert incidence[2] == 0
+
+
+def test_growth_fit_with_only_one_bin_is_unavailable():
+    assert np.isnan(estimate_growth(np.array([0.5]), np.array([0])))
+
+
+def test_incidence_binning_excludes_initial_seeds():
+    result = simulate(0, 1, 2, duration=2)
+    times, incidence = binned_incidence(result)
+    np.testing.assert_array_equal(times, [0.5, 1.5])
+    np.testing.assert_array_equal(incidence, [0, 0])
+
+
+def test_partial_incidence_bin_preserves_counts():
+    result = simulate(1.5, 1, 2, initial_infections=100, duration=2.5)
+    times, incidence = binned_incidence(result)
+    np.testing.assert_array_equal(times, [0.5, 1.5, 2.25])
+    assert np.dot(incidence, [1, 1, 0.5]) == result.incidence.sum()
+
+
+def _mock_growth(monkeypatch, root, noise=(0, 0, 0)):
+    calls = []
+
+    def fake_simulate(r0, *args, **kwargs):
+        calls.append(kwargs["seed"])
+        return r0 - root + noise[(len(calls) - 1) % len(noise)]
+
+    monkeypatch.setattr(simulation_module, "simulate", fake_simulate)
+    monkeypatch.setattr(
+        simulation_module,
+        "binned_incidence",
+        lambda rate, width: (np.array([0.0, 1.0]), np.exp([0.0, rate])),
+    )
+    return calls
+
+
+def test_critical_bisection_brackets_zero(monkeypatch):
+    calls = _mock_growth(monkeypatch, 3.7)
+    result = find_critical_r0(1, 2)
+    assert result.status == "bracketed"
+    assert result.lower <= 3.7 <= result.upper
+    assert result.upper - result.lower <= 0.25
+    assert len(set(calls)) == len(calls)
+    assert all(len(rates) == 3 for _, rates in result.evaluations)
+
+
+def test_critical_median_tolerates_one_outlier(monkeypatch):
+    _mock_growth(monkeypatch, 3.7, noise=(0, 0, 10))
+    result = find_critical_r0(1, 2)
+    assert result.lower <= 3.7 <= result.upper
+
+
+@pytest.mark.parametrize("root,status", [(0, "below_range"), (20, "above_range")])
+def test_critical_outside_bracket(monkeypatch, root, status):
+    _mock_growth(monkeypatch, root)
+    result = find_critical_r0(1, 2)
+    assert result.status == status
+    assert np.isnan(result.estimate)
+
+
+def test_critical_unavailable_fit_is_unresolved(monkeypatch):
+    _mock_growth(monkeypatch, 3.7)
+    monkeypatch.setattr(simulation_module, "estimate_growth", lambda *args: np.nan)
+    assert find_critical_r0(1, 2).status == "unresolved"

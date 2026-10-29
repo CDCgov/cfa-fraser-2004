@@ -4,120 +4,117 @@ import pytest
 
 import fraser
 from fraser import main
-from fraser.plots import deterministic_chart, incidence_chart, incidence_records
-from fraser.simulation import simulate
+from fraser.plots import (
+    critical_chart,
+)
+from fraser.simulation import CriticalResult
 
 
-def test_svg_export(tmp_path):
-    path = tmp_path / "deterministic.svg"
-    deterministic_chart().save(path)
-    root = ET.parse(path).getroot()
-    assert root.tag == "{http://www.w3.org/2000/svg}svg"
-    text = " ".join(root.itertext())
-    assert "Deterministic control thresholds" in text
-    assert "exponential Eq. 18" in text
-    assert "Eq. 16" not in text
-    assert "100%" in text
-
-
-def test_deterministic_bounds_and_axis(tmp_path):
-    chart = deterministic_chart()
-    spec = chart.to_dict()
-    for panel in spec["vconcat"]:
-        for layer in panel["layer"]:
-            assert layer["encoding"]["y"]["scale"] == {
-                "domain": [0, 15],
-                "nice": False,
-            }
-        assert panel["layer"][1]["encoding"]["strokeDash"]["scale"]["range"] == [
-            [],
-            [6, 3],
-        ]
-        assert panel["layer"][1]["encoding"]["y"]["axis"]["values"] == [
-            0,
-            3,
-            6,
-            9,
-            12,
-            15,
-        ]
-    path = tmp_path / "deterministic.svg"
-    chart.save(path)
-    root = ET.parse(path).getroot()
-    for color, pattern in [("black", ""), ("#2864b4", "6,3")]:
-        curves = [
-            element
-            for element in root.iter()
-            if element.get("stroke") == color and element.tag.endswith("path")
-        ]
-        assert len(curves) == 4
-        assert all(curve.get("stroke-dasharray", "") == pattern for curve in curves)
-
-
-@pytest.mark.parametrize("logarithmic", [False, True])
-def test_incidence_svg(tmp_path, logarithmic):
+def test_critical_svg_and_out_of_range_markers(tmp_path):
     results = [
-        simulate(1.5, 1, 2, initial_infections=20, duration=2, tracing=tracing)
-        for tracing in [0, 1]
+        CriticalResult(1, 2, 0.9, 1, 0.5, 3.5, 3.7, "bracketed", []),
+        CriticalResult(0.5, 2, 0.9, 1, 0.2, 1, 15, "above_range", []),
+        CriticalResult(2, 2, 0.9, 1, 0.8, 1, 15, "unresolved", []),
     ]
-    path = tmp_path / "incidence.svg"
-    incidence_chart(results, logarithmic=logarithmic).save(path)
-    root = ET.parse(path).getroot()
-    assert root.tag == "{http://www.w3.org/2000/svg}svg"
-    text = " ".join(root.itertext())
-    assert "Simulated incidence" in text
-    assert "theta=50.0%" in text
-    assert "20 initial infections per run" in text
+    chart = critical_chart(results)
+    path = tmp_path / "critical.svg"
+    chart.save(path)
+    text = " ".join(ET.parse(path).getroot().itertext())
+    assert "Simulated outbreak-control thresholds" in text
+    assert "unresolved: 1" in text
+    assert "Smallpox" in text
+    records = chart.to_dict()["data"]["values"]
+    assert records[0]["r0"] == 3.6
+    assert records[1]["r0"] == 15
+    assert records[2]["r0"] is None
+    references = [record for record in records if record["source"] == "Deterministic"]
+    assert len(references) == 200
+    assert references[-1]["r0"] == 1
+    lines = chart.to_dict()["spec"]["layer"][2]
+    assert lines["encoding"]["strokeDash"]["scale"]["range"] == [[], [], [6, 3]]
+    assert lines["encoding"]["strokeWidth"]["condition"]["value"] == 2.5
 
 
-def test_incidence_bins_preserve_counts_and_partial_bin():
-    result = simulate(1.5, 1, 2, initial_infections=100, duration=2.5)
-    records = incidence_records(result)
-    assert len(records) == 3
-    assert (
-        sum(record["incidence"] for record in records[:2])
-        + records[2]["incidence"] * 0.5
-        == result.incidence.sum()
+def test_combined_isolation_reference():
+    result = CriticalResult(1, 2, 0.9, 0, 0.5, 1.7, 1.9, "bracketed", [])
+    records = critical_chart([result]).to_dict()["data"]["values"]
+    reference = next(
+        record
+        for record in records
+        if record.get("series") == "Isolation only (Eq. 6)" and record["theta"] == 0.5
     )
+    assert reference["r0"] == fraser.isolation_threshold(0.5, 0.9)
 
 
-def test_log_plot_keeps_zero_incidence_as_missing():
-    chart = incidence_chart([simulate(0, 1, 2, duration=2)], logarithmic=True)
-    spec = chart.to_dict()
-    assert all(record["incidence"] is None for record in spec["data"]["values"])
+def test_efficacy_panels_have_both_gamma_shapes_and_both_references():
+    results = [
+        CriticalResult(1, shape, isolation, 1, 0.5, 3, 3.5, "bracketed", [])
+        for isolation in [1, 0.9, 0.75]
+        for shape in [2, 10]
+    ]
+    spec = critical_chart(results).to_dict()
+    assert spec["facet"]["row"]["field"] == "efficacy"
+    color_scale = spec["spec"]["layer"][2]["encoding"]["color"]["scale"]
+    palette = dict(zip(color_scale["domain"], color_scale["range"]))
+    assert palette["Tracing (k=10)"] == "#2864b4"
+    assert palette["Tracing (k=2)"] == "#d34836"
+    assert spec["facet"]["row"]["sort"] == [
+        "Isolation 100%",
+        "Isolation 90%",
+        "Isolation 75%",
+    ]
+    for efficacy in spec["facet"]["row"]["sort"]:
+        curves = {
+            record["series"]
+            for record in spec["data"]["values"]
+            if record["efficacy"] == efficacy and "series" in record
+        }
+        assert curves == {
+            "Isolation only (Eq. 6)",
+            "Tracing (k=2)",
+            "Tracing (k=10)",
+            "Exponential tracing (Eq. 18)",
+        }
 
 
-def test_population_limit_is_marked():
-    result = simulate(
-        20, 1, 2, initial_infections=100, max_infections=200, timestep=0.1, duration=2
-    )
-    records = incidence_records(result)
-    assert records[-1]["truncated"]
-    assert records[-1]["last"]
-
-
-@pytest.mark.parametrize("output_after_command", [False, True])
-def test_simulation_command(tmp_path, monkeypatch, output_after_command):
+@pytest.mark.parametrize("theta", [0.05, 0.5, 0.95])
+@pytest.mark.parametrize("shape", [2, 10])
+def test_critical_command(tmp_path, monkeypatch, theta, shape):
     monkeypatch.setattr(
         fraser,
         "SIMULATION_SETTINGS",
         {
             **fraser.SIMULATION_SETTINGS,
-            "r0": [2],
-            "symptom_mean": [1],
-            "shape": [2],
-            "initial_infections": 20,
-            "timestep": 0.1,
-            "duration": 1,
+            "shape": [shape],
+            "theta": [theta],
+            "isolation": [0.9],
         },
     )
-    output_args = ["--output-dir", str(tmp_path)]
+    calls = []
+
+    def fake_search(symptom_mean, shape, **kwargs):
+        calls.append((symptom_mean, shape, kwargs["isolation"], kwargs["tracing"]))
+        return CriticalResult(
+            symptom_mean,
+            shape,
+            kwargs["isolation"],
+            kwargs["tracing"],
+            fraser.presymptomatic_fraction(symptom_mean, shape),
+            3.5,
+            3.7,
+            "bracketed",
+            [],
+        )
+
     monkeypatch.setattr(
-        "sys.argv",
-        ["fraser", "simulate", *output_args]
-        if output_after_command
-        else ["fraser", *output_args, "simulate"],
+        fraser,
+        "find_critical_r0",
+        fake_search,
     )
+    monkeypatch.setattr("sys.argv", ["fraser", "--output-dir", str(tmp_path)])
     main()
-    assert (tmp_path / "simulation-linear.svg").is_file()
-    assert (tmp_path / "simulation-log.svg").is_file()
+    assert [path.name for path in tmp_path.iterdir()] == ["control.svg"]
+    assert len(calls) == 1
+    symptom_mean, actual_shape, isolation, tracing = calls[0]
+    assert (actual_shape, isolation, tracing) == (shape, 0.9, 1)
+    assert fraser.presymptomatic_fraction(symptom_mean, shape) == pytest.approx(theta)

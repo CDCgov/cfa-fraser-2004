@@ -7,6 +7,8 @@ extra_javascript = [
     "https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js",
 ]
 
+nav = ["index.md", "deterministic.md", "simulation.md"]
+
 [project.theme]
 language = "en"
 features = [

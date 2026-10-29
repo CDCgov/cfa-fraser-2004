@@ -29,9 +29,52 @@ It reports agreement at perfect isolation for the distributions tested and poten
   | Replicates              | 100 per evaluated parameter combination                      |
   | Step size               | Reduced until convergence; final value not given             |
 
-Use the [same gamma calibration](deterministic.md#gamma-calibration) as in the deterministic calculation.
 This is a branching process, not a finite-population SIR model.
 Do not remove infectious people at an arbitrary recovery age without controlling the omitted gamma-tail mass.
+
+## Gamma calibration
+
+Gamma distributions are needed for this future simulation, not for the current deterministic plots.
+Both infectiousness and incubation densities have shape $k = 1/c$, where $c = \mathrm{variance}/\mathrm{mean}^2$.
+The paper uses $c = 0.1$ (shape 10) and $c = 0.5$ (shape 2).
+Fix $T_g = 3$ arbitrary units and infectiousness scale $a = T_g/k$; let $b$ be the incubation scale.
+
+To index simulations by theta, choose $b$ so that transmission precedes symptoms with probability theta:
+
+$$
+  \theta = P(X < Z) = I_{b/(a+b)}(k,k),
+  \qquad
+  z = I^{-1}_\theta(k,k),\qquad b = a\frac{z}{1 - z},
+$$
+
+where $X \sim \mathrm{Gamma}(k,a)$, $Z \sim \mathrm{Gamma}(k,b)$ are independent and $I$ is the regularized incomplete beta function.
+Scaling both gammas to unit scale makes their ratio to their sum beta-distributed, giving the identity.
+`fraser.gamma_parameters` performs this calibration with SciPy's `betaincinv`, without a root search.
+It accepts $0 < \theta < 1$ and positive variance ratios, including noninteger gamma shapes.
+
+Drawing an incubation duration is then straightforward:
+
+```python
+import numpy as np
+from scipy.stats import gamma
+
+from fraser import gamma_parameters
+
+shape, infectiousness_scale, incubation_scale = gamma_parameters(
+    theta=0.3, variance_ratio=0.1
+)
+rng = np.random.default_rng(2004)
+incubation_duration = rng.gamma(shape, scale=incubation_scale)
+
+infection_age, r0, delta = 2.0, 3.0, 0.03
+rate = r0 * gamma.pdf(infection_age, shape, scale=infectiousness_scale)
+new_infections = rng.poisson(rate * delta)
+```
+
+This illustrates one step's draws, not a complete simulation.
+The paper draws incubation times but uses a gamma **density** for the Poisson transmission rate.
+Arbitrary gamma draws alone would not ensure the requested theta.
+Changing both time scales proportionally leaves theta and the idealized threshold unchanged.
 
 ## State and timestep algorithm
 
@@ -133,13 +176,12 @@ More seeds, replicates, and horizon checks address distinct problems and are not
 2. With no interventions, recover a mean of $R_0$ lifetime infections per case, allowing for numerical error in the timestep sum of $\beta(\tau)\delta$.
 3. With zero isolation efficacy and no initially quarantined people, tracing must have no effect: nobody can initiate it.
    The independent analytical approximation need not satisfy this realistic-model check.
-4. With perfect isolation, compare the realistic simulation's thresholds to Equation 16 for shapes 1, 2, and 10, as checked by the paper.
-5. In a separate diagnostic mode, draw independent isolation and tracing clocks, and let the tracing clock act independently of successful isolation.
-   Compare with the independent analytical model.
-   Do not label diagnostic curves as realistic Figure 3 results.
-6. Refine timestep, lengthen horizon, vary fitting windows, and increase seeds and replicates.
+4. With exponential distributions (shape 1) and perfect isolation, compare the realistic simulation's thresholds to corrected Equation 18, where the paper reports agreement.
+   At imperfect isolation, do not require the realistic simulation to match this independent approximation.
+   No Equation 16 solver is needed; gamma cases retain the isolation-only benchmark from item 1.
+5. Refine timestep, lengthen horizon, vary fitting windows, and increase seeds and replicates.
    Require changes small compared with reported uncertainty; check ambiguous same-step conventions separately.
-7. Test a hand-built tree: quarantining a presymptomatic child blocks its transmission but does not trace its children until symptoms.
+6. Test a hand-built tree: quarantining a presymptomatic child blocks its transmission but does not trace its children until symptoms.
    Each eligible person traces at most once.
 
-Only after these checks should simulated curves replace or accompany the current deterministic upper bounds.
+Only after these checks should simulated gamma curves accompany the current deterministic exponential example.

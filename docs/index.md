@@ -2,9 +2,9 @@
 
 See [Fraser et al. (2004)](https://doi.org/10.1073/pnas.0307506101) for motivation and explanation of the math.
 This package implements the closed-form [deterministic equations](deterministic.md).
-The [stochastic simulations](simulation.md) needed for Figure 3's tracing curves are documented but not yet implemented.
+The [stochastic simulator](simulation.md) produces exploratory incidence timecourses with isolation and tracing.
 
-## Deterministic example
+## Results
 
 ![](figures/deterministic.svg)
 

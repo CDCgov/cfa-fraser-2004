@@ -1,5 +1,9 @@
 # Deterministic mathematics
 
+The paper begins with definitions that culminate in Equation 6, which describes the [isolation-only](#isolation-only) case.
+A general derivation of contact tracing culminates in Equation 16.
+Strong simplifying assumptions produce the [tracing and quarantine](#tracing-and-quarantining) result in Equation 18.
+
 ## Isolation only
 
 Let $\tau$ denote time since infection.

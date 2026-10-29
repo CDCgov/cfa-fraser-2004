@@ -8,6 +8,7 @@ Read the [docs](docs/index.md) for more information.
 
 ```sh
 uv run fraser # make the figures
+uv run fraser simulate # exploratory simulations
 uv run --group dev pytest
 ```
 

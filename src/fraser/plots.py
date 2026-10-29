@@ -9,6 +9,7 @@ from fraser.model import (
     exponential_threshold,
     isolation_threshold,
 )
+from fraser.simulation import SimulationResult
 
 DISEASE_RANGES = [
     {"disease": "SARS", "theta_min": 0, "theta_max": 0.11, "r0_min": 2, "r0_max": 4},
@@ -118,6 +119,101 @@ def deterministic_chart() -> alt.VConcatChart:
             title=alt.TitleParams(
                 text="Deterministic control thresholds",
                 subtitle="Solid: Eq. 6; dashed: exponential Eq. 18, not simulated Figure 3",
+            )
+        )
+    )
+
+
+def incidence_records(
+    result: SimulationResult,
+    bin_width: float = 1.0,
+) -> list[dict]:
+    """Aggregate new infections over bins, excluding the seed infections."""
+    if not math.isfinite(bin_width) or bin_width <= 0:
+        raise ValueError("bin_width must be positive and finite")
+    per_bin = round(bin_width / result.timestep)
+    if per_bin < 1 or not math.isclose(per_bin * result.timestep, bin_width):
+        raise ValueError("bin_width must be an integer number of timesteps")
+    records = []
+    for start in range(0, len(result.incidence) - 1, per_bin):
+        end = min(start + per_bin, len(result.incidence) - 1)
+        records.append(
+            {
+                "time": (result.times[start] + result.times[end]) / 2,
+                "incidence": int(result.incidence[start + 1 : end + 1].sum())
+                / (result.times[end] - result.times[start]),
+                "r0": f"R0 = {result.r0:g}",
+                "scenario": f"k={result.shape:g}, Ts={result.symptom_mean:g}, theta={result.theta:.1%}",
+                "policy": f"Isolation {result.isolation:.0%}; tracing {result.tracing:.0%}",
+                "truncated": not result.completed,
+                "last": end == len(result.incidence) - 1,
+            }
+        )
+    if not records:
+        records.append(
+            {
+                "time": 0,
+                "incidence": None,
+                "r0": f"R0 = {result.r0:g}",
+                "scenario": f"k={result.shape:g}, Ts={result.symptom_mean:g}, theta={result.theta:.1%}",
+                "policy": f"Isolation {result.isolation:.0%}; tracing {result.tracing:.0%}",
+                "truncated": not result.completed,
+                "last": True,
+            }
+        )
+    return records
+
+
+def incidence_chart(
+    results: list[SimulationResult],
+    *,
+    logarithmic: bool = False,
+    bin_width: float = 1.0,
+) -> alt.FacetChart:
+    """Plot timecourses by parameter pair, marking population-limit endpoints."""
+    if not results:
+        raise ValueError("at least one simulation result is required")
+    initial_counts = {result.initial_infections for result in results}
+    initial_label = (
+        f"{next(iter(initial_counts)):,} initial infections per run"
+        if len(initial_counts) == 1
+        else "Initial infections vary by run"
+    )
+    records = [
+        record for result in results for record in incidence_records(result, bin_width)
+    ]
+    if logarithmic:
+        for record in records:
+            if record["incidence"] == 0:
+                record["incidence"] = None
+    base = alt.Chart(alt.Data(values=records)).encode(
+        x=alt.X("time:Q", title="Time / Tg"),
+        y=alt.Y(
+            "incidence:Q",
+            title="New infections / Tg",
+            scale=alt.Scale(type="log" if logarithmic else "linear"),
+        ),
+        color=alt.Color("policy:N", title=None, legend=alt.Legend(orient="bottom")),
+    )
+    lines = base.mark_line()
+    stops = base.transform_filter("datum.truncated && datum.last").mark_point(
+        shape="cross", size=60
+    )
+    return (
+        (lines + stops)  # ty: ignore[unsupported-operator]
+        .properties(width=240, height=150)
+        .facet(
+            row=alt.Row("scenario:N", title=None, header=alt.Header(labelAngle=0)),
+            column=alt.Column("r0:N", title=None),
+        )
+        .resolve_scale(y="independent")
+        .properties(
+            title=alt.TitleParams(
+                text=f"Simulated incidence ({'log' if logarithmic else 'linear'} scale)",
+                subtitle=[
+                    f"{initial_label}; plotted incidence excludes seeds",
+                    "Crosses mark population-limit truncation",
+                ],
             )
         )
     )

@@ -1,187 +1,224 @@
-# Simulation protocol for Figure 3
+# Simulation protocol
 
-**Specification for future implementation.** The current package computes deterministic thresholds only.
-Proposed settings below are not historical values or validated defaults.
+The timestep simulator is implemented for exploratory incidence plots.
+Growth-rate estimation and critical-R0 searches are deferred.
 
 ## Role of the simulation
 
 Figure 3's black lines come from Equation 6.
-Its colored lines were found by repeating the stochastic individual-based simulation 100 times for candidate $(R_0,\theta)$ combinations and finding where incidence neither grew nor declined on average.
-Simulation also demonstrated the limitations of the independent tracing approximation in Equations 14-18.
-
-In the realistic simulation, one symptom time determines both isolation and the opportunity to trace that person's contacts.
-These events are correlated.
-The paper also describes a modified simulation with independent clocks to diagnose the analytical approximation, not to construct the realistic curves.
-It reports agreement at perfect isolation for the distributions tested and potentially substantial overestimation of tracing benefit at imperfect isolation.
+Its colored lines show the results of 100 replicates of a stochastic, individual-based simulation.
+The paper checks for $(R_0,\theta)$ combinations for which incidence neither grew nor declined on average.
+Here, we simulate one population with many initial infections per scenario, rather than many single-seed replicates.
+Different seed trees are independent, although tracing couples individuals within each tree.
+Without per-tree resource limits or stopping, their combined incidence is equivalent in distribution to summing independent single-seed simulations.
 
 ## Model specified by the paper
 
-  | Input                   | Choice                                                       |
-  | ----------------------- | ------------------------------------------------------------ |
-  | Population              | Early outbreak, homogeneous mixing, no susceptible depletion |
-  | Infectiousness          | Common rate $\beta(\tau) = R_0g(\tau)$                       |
-  | Incubation              | Independent individual draws with survival function $S$      |
-  | Distributions           | Gamma infectiousness and incubation densities                |
-  | Variance / mean squared | 0.1 or 0.5 for both distributions                            |
-  | Isolation efficacy      | 1, 0.9, or 0.75                                              |
-  | Tracing efficacy        | 1 for colored curves, 0 for isolation-only checks            |
-  | Explicit delays         | None                                                         |
-  | Replicates              | 100 per evaluated parameter combination                      |
-  | Step size               | Reduced until convergence; final value not given             |
+- Homogeneous mixing
+- No susceptible depletion
+- Infectiousness: Common rate $\beta(\tau) = R_0g(\tau)$; $g$ is gamma.
+- Incubation: Independent individual draws with survival function $S$ for gamma distribution.
+- Shape: $1/0.1 = 10$ ("low variance") or $1/0.5 = 2$ ("high variance") for both distributions
+- Isolation efficacy: 1, 0.9, or 0.75
+- Tracing efficacy: 1
+- Replicates: 100 per evaluated parameter combination
+- Step size: Reduced until convergence; final value not given
 
-This is a branching process, not a finite-population SIR model.
-Do not remove infectious people at an arbitrary recovery age without controlling the omitted gamma-tail mass.
+## Gamma parameterization
 
-## Gamma calibration
+We specify the mean $\mu$ and the shape $k$.
+(The paper specifies these values in the form $\mathrm{variance} = 1/k \times \mathrm{mean}^2$.)
+Infectiousness and incubation densities have the same shape.
 
-Gamma distributions are needed for this future simulation, not for the current deterministic plots.
-Both infectiousness and incubation densities have shape $k = 1/c$, where $c = \mathrm{variance}/\mathrm{mean}^2$.
-The paper uses $c = 0.1$ (shape 10) and $c = 0.5$ (shape 2).
-Fix $T_g = 3$ arbitrary units and infectiousness scale $a = T_g/k$; let $b$ be the incubation scale.
+We fix $T_g = 1$ to set the time scale.
+We vary the mean $T_s$ of the symptom onset distribution and $R_0$ over a grid.
 
-To index simulations by theta, choose $b$ so that transmission precedes symptoms with probability theta:
+This makes $\theta$ a derived parameter.
+For potential transmission age $G \sim \mathrm{Gamma}(\mu = 1, k)$ and symptom onset age $T \sim \mathrm{Gamma}(\mu = T_s, k)$, we have
 
 $$
-  \theta = P(X < Z) = I_{b/(a+b)}(k,k),
-  \qquad
-  z = I^{-1}_\theta(k,k),\qquad b = a\frac{z}{1 - z},
+  \theta = \mathbb{P}[G<T] = I_{T_s/(1+T_s)}(k,k)
 $$
 
-where $X \sim \mathrm{Gamma}(k,a)$, $Z \sim \mathrm{Gamma}(k,b)$ are independent and $I$ is the regularized incomplete beta function.
-Scaling both gammas to unit scale makes their ratio to their sum beta-distributed, giving the identity.
-`fraser.gamma_parameters` performs this calibration with SciPy's `betaincinv`, without a root search.
-It accepts $0 < \theta < 1$ and positive variance ratios, including noninteger gamma shapes.
+where $I$ is the regularized incomplete beta function.
 
-Drawing an incubation duration is then straightforward:
+In code, the infectiousness scale is $1/k$ and incubation scale is $T_s/k$.
+`presymptomatic_fraction(symptom_mean, shape)` evaluates this identity with SciPy's `betainc`.
+This is the continuous-time, no-intervention theta; timestep discretization slightly changes the realized timing of transmission and removal.
 
 ```python
-import numpy as np
-from scipy.stats import gamma
+from fraser import simulate
 
-from fraser import gamma_parameters
-
-shape, infectiousness_scale, incubation_scale = gamma_parameters(
-    theta=0.3, variance_ratio=0.1
+result = simulate(
+    r0=2,
+    symptom_mean=1,
+    shape=2,
+    isolation=0.9,
+    tracing=1,
+    initial_infections=1_000,
+    timestep=0.01,
+    duration=10,
+    seed=2004,
 )
-rng = np.random.default_rng(2004)
-incubation_duration = rng.gamma(shape, scale=incubation_scale)
-
-infection_age, r0, delta = 2.0, 3.0, 0.03
-rate = r0 * gamma.pdf(infection_age, shape, scale=infectiousness_scale)
-new_infections = rng.poisson(rate * delta)
+print(result.theta, result.completed, result.total_infections)
 ```
 
-This illustrates one step's draws, not a complete simulation.
-The paper draws incubation times but uses a gamma **density** for the Poisson transmission rate.
-Arbitrary gamma draws alone would not ensure the requested theta.
-Changing both time scales proportionally leaves theta and the idealized threshold unchanged.
+## Algorithm
 
-## State and timestep algorithm
+The model state consists of:
 
-Store each person's infection time, symptom time, infector, infected children, isolation-success indicator, isolation/quarantine status, and traced-once flag.
-Retain removed individuals: future symptom events can still initiate tracing.
+- the clock time and
+- infected people and their states.
 
-At time zero, infect $Y_i$ individuals at age zero and draw incubation durations and independent Bernoulli isolation-success indicators with probability $\varepsilon_I$.
-Use an explicit NumPy random generator.
+Each person's state includes:
 
-Follow the paper's stated timestep ordering:
+- infection (clock) time
+- symptom onset delay (allowing derivation of the symptom onset clock time)
+- infector
+- infectees
+- isolated y/n
+- quarantined y/n
+- symptoms processed y/n
+- contacts traced y/n
 
-1. Advance infection ages by $\delta$.
-2. Each person neither isolated nor quarantined generates $\mathrm{Poisson}(\beta(\tau)\delta)$ infections at the updated age.
-3. Add newborn infections at age zero; draw their incubation durations and isolation indicators, and record parent-child links.
-   Newborns do not transmit during this same step.
-4. Process symptoms and removals.
-   A newly symptomatic person is isolated if isolation succeeds.
-   An isolated symptomatic person has each infected child quarantined independently with probability $\varepsilon_T$.
+Upon person instantiation (i.e., infection), draw the incubation period (i.e., symptom onset delay).
+Round symptom times up to a timestep, with a minimum delay of one step.
+Records use growing NumPy arrays and parent/child links.
+Retain removed individuals because their subsequent symptoms can initiate tracing.
 
-Quarantine stops transmission immediately.
-A quarantined presymptomatic contact does **not** trigger tracing until symptoms appear.
-Only forward tracing along infected parent-child links is included: no backward tracing, uninfected-contact screening, or recursive presymptomatic tracing.
-Isolation is all-or-nothing, not a partial rate reduction for every symptomatic person.
-These choices give the same isolation-only mean but need not be interchangeable once tracing is introduced.
+At simulation start, infect $Y_i$ individuals at age zero, without infectors.
+Then iterate:
 
-### Event conventions not fully specified
+1. Advance time (and infection ages) by $\delta$.
+1. Select a snapshot of people who are neither isolated nor quarantined.
+   Draw their $\mathrm{Poisson}(\beta(\tau)\delta)$ infections in one vectorized call, using precomputed rates by integer infection age.
+1. Create all newborn infections at the current clock time, assign parents, and draw symptom delays.
+   Newborns are excluded from this step's transmission snapshot.
+1. Process symptoms.
+   For each newly-symptomatic person:
+    - If they were previously quarantined, isolate them, and quarantine each of their (not-isolated and not-quarantined) infectees with probability $\varepsilon_T$.
+    - Otherwise, isolate them with probability $\varepsilon_I$.
+      If isolated, quarantine each of their (not-isolated and not-quarantined) infectees with probability $\varepsilon_T$.
+1. Process quarantine cascades.
+   For each newly-quarantined person whose symptoms had already onset, quarantine each of their (not-isolated and not-quarantined) infectees with probability $\varepsilon_T$.
+   Recurse as needed.
+   Such symptomatic contacts are also marked isolated.
+   A queue and traced-once flags prevent repeated tracing.
 
-Proposed choices that must be recorded and checked:
+Note that:
 
-- A quarantined person is already removed.
-  At their symptoms they can trace children even if their independent isolation indicator was false.
-  This interprets a quarantined symptomatic person as an isolated case.
-  Check the alternative interpretation for sensitivity at imperfect isolation.
-- If a quarantined child is already symptomatic, process their tracing in the same removal phase.
-  Use a queue and traced-once flags.
-  Cascades may pass through symptomatic people, never through presymptomatic people.
-- Symptoms occurring within a step are processed after its transmissions, as listed in the paper.
-  This artificial delay is at most $\delta$ and must vanish under timestep refinement.
-- Interventions operate from time zero.
-  Seeds have no recorded infector and cannot be traced from an external source, but can initiate tracing themselves.
-  Exclude the initialization transient when estimating growth.
+- Infected people are assumed to infect no other people in the first $\delta$ time of their infection.
+- Transmission precedes symptom processing, following the paper's stated order.
+  The resulting artificial removal delay should shrink with $\delta$.
+- Symptoms are processed once; failed isolation is not retried on later steps.
+- Previously-quarantined, now-symptomatic people are isolated with probability 1, not $\varepsilon_I$.
+  This is our convention for treating quarantined symptomatic people as isolated cases, not an explicit Bernoulli rule from the paper.
+- Quarantine blocks transmission but preserves later symptom-triggered tracing.
+  The paper's simulation step 3 says only "not isolated"; this interpretation is supported by its definition of transmitting individuals as neither quarantined nor isolated (p. 6148) and effective isolation of traced contacts (p.
+  6150).
+- There is no backward tracking, uninfected contact screening, etc.
+- Isolation is all-or-nothing.
+- An otherwise successful quarantine attempt has no effect on a quarantined or isolated person.
+  (This is not specified explicitly in the paper.)
+- Quarantine cascades are not specified in the paper.
+  Our cascades pass through already-symptomatic people, never through presymptomatic people.
 
-These are reproducible interpretations, not claims about the authors' code.
-If they change the limiting curves materially, report the ambiguity rather than silently tuning conventions to match the image.
+## Exploratory defaults
 
-## Omitted settings and proposed starting values
+These are implementation choices, not settings supplied by the paper:
 
-Time is expressed in generation-time units; $T_g = 3$ arbitrary units fixes the overall scale without changing the idealized threshold.
+They are collected in the `SIMULATION_SETTINGS` block near the top of the package entry point.
+Edit that block to change the experiment; simulation parameters are not CLI options.
 
-  | Setting omitted or incompletely specified | Proposed starting choice                                                                       |
-  | ----------------------------------------- | ---------------------------------------------------------------------------------------------- |
-  | Initial infections $Y_i$                  | 1,000 per replicate                                                                            |
-  | Numerical timestep                        | $T_g/100$; repeat with $T_g/200$ and $T_g/400$                                                 |
-  | Horizon                                   | $40T_g$; lengthen to test stability                                                            |
-  | Growth fitting window                     | $20T_g$ to $40T_g$                                                                             |
-  | Incidence bins                            | Width $T_g$, counting new infections                                                           |
-  | Theta grid                                | 0.02 to 0.98 by 0.02, refining curved regions                                                  |
-  | R0 bracket                                | Start at 1 and 2, doubling the upper bound until growth is established                         |
-  | R0 search safeguard                       | 128; if unbracketed, report unresolved or above bound, not threshold 128                       |
-  | Precision target                          | R0 bracket width 0.02, subject to Monte Carlo uncertainty                                      |
-  | Replicates                                | Initially 100; increase near ambiguous boundaries                                              |
-  | Randomness                                | Master seed 2004 and recorded independent `SeedSequence` streams per evaluation/replicate      |
-  | Resource safeguard                        | Initially $10^6$ infections per replicate; reaching it invalidates a complete-history estimate |
-  | Uncertainty                               | Bootstrap entire independent replicate histories; initially 1,000 resamples                    |
+- Initial infections: 1,000 per scenario
+- Timestep: 0.01
+- Horizon: 10, an integer number of timesteps
+- R0 values: 2 and 3
+- Symptom-onset means: 0.5 and 1
+- Shapes: 2 and 10
+- Isolation efficacy: 0.9
+- Tracing efficacy: compare 0 against 1
+- Size bound: $10^6$ cumulative infections, including seeds
+- Master random seed: 2004; independent `SeedSequence` streams for CLI grid locations
+- Incidence bins: width 1, an integer number of timesteps
 
-Resource limits are not epidemic outcomes.
-Do not classify capped runs as extinct, drop them from the mean, or fit truncated histories as complete.
-Increase resources or report the evaluation unresolved.
-The plot's maximum R0 of 15 must not constrain the numerical search.
+All times are in units of $T_g = 1$.
+There is no stopping after a zero-incidence timestep: gamma infectiousness has an unbounded tail.
+If the next birth batch would exceed the size bound, reject that entire step and return only previously completed steps with `completed=False`.
+No partial birth batch is retained; the reported population can therefore be below the cap.
+This is resource truncation, not extinction or an estimate of growth.
 
-## Growth estimator and threshold search
+`SimulationResult` includes per-step new infections, isolations, and quarantines, plus input parameters, theta, seed, total infections, and completion status.
+Incidence excludes the initial infections.
+Isolation and quarantine counts are events, not disjoint population totals: someone may be quarantined and later isolated.
+Full person records and per-seed uncertainty estimates are not returned.
 
-The paper does not report its exact estimator.
-A proposed reproducible method:
+## Run and inspect
 
-1. Simulate independent replicates at each parameter combination.
-2. Compute binned **mean incidence including extinct runs' zeros**.
-   Do not condition on survival.
-3. Fit log mean incidence against bin midpoint over the late-time window.
-   Its slope estimates exponential growth rate $r$.
-   Do not add pseudocounts.
-   If a required mean bin is zero, the slope is unresolved; increase sampling or reconsider the window.
-   All-replicate extinction alone does not establish subcriticality.
-4. Bootstrap whole replicate histories and repeat the fit.
-   Record failures caused by zero bins rather than silently discarding bootstrap samples.
-5. Bracket negative and positive growth.
-   Bisect only when the sign is adequately resolved.
-   If uncertainty spans zero, increase sampling rather than trusting a noisy sign.
-6. Report the R0 bracket and Monte Carlo uncertainty.
-   Repeat with longer horizons and different fitting windows to check asymptotic behavior.
+```sh
+uv run fraser simulate
+```
 
-The target is $r = 0$, not a chosen extinction probability.
-Even supercritical finite outbreaks can die out; near criticality a few large outbreaks may dominate the mean.
-More seeds, replicates, and horizon checks address distinct problems and are not substitutes for one another.
+This runs all 16 combinations above and writes two Altair SVGs:
 
-## Required validation
+- `docs/figures/simulation-linear.svg`
+- `docs/figures/simulation-log.svg`
+
+![Linear incidence](figures/simulation-linear.svg)
+
+![Log incidence](figures/simulation-log.svg)
+
+Each curve represents one large simulation.
+The first point is **new infections during the first bin**, not the 1,000 initial infections.
+For example, a first-bin count of 200 does not mean that simulation started with 200 people.
+The seed count is displayed separately in the figure subtitle.
+
+Incidence is averaged within time bins and plotted at their midpoints, in new infections per unit generation time.
+Bins cover successive timestep groups $(a,b]$; a final short bin uses its actual duration.
+Zero-incidence bins are missing on the log plot, not replaced with pseudocounts.
+Crosses mark population-limited runs' last recorded bins, not the exact stopping time; console output reports the latter.
+Policies share a y-axis within each panel, with independent y-scales across parameter combinations.
+
+To change the experiment, edit the settings block, for example:
+
+```python
+SIMULATION_SETTINGS = {
+    "r0": [2],
+    "symptom_mean": [1],
+    "shape": [2],
+    "isolation": 0.9,
+    "tracing": 1,
+    "initial_infections": 10_000,
+    "timestep": 0.005,
+    "duration": 20,
+    "max_infections": 5_000_000,
+    "seed": 2004,
+    "bin_width": 1,
+}
+```
+
+Run the same `uv run fraser simulate` command after editing.
+The only simulation-command option is `--output-dir`, for example `uv run fraser simulate --output-dir /tmp/fraser`.
+The command compares tracing off against the requested tracing efficacy.
+The Python `simulate(...)` API still accepts its parameters directly.
+
+## Growth fitting: next stage
+
+No growth fit or automated threshold search is implemented yet.
+The initial fitting window will start at time 0, using all observed incidence bins at their midpoints, not the seed population as an incidence observation.
+Fit log incidence against **time**, excluding zero bins explicitly rather than adding pseudocounts.
+Compare the result after dropping the first bin to check leverage from initialization; full-window fitting is an exploratory choice, not a guarantee of asymptotic growth.
+Resource-truncated histories require separate handling before using fits to infer a critical R0.
+
+## Validation status
+
+Tests cover reproducibility, mean-based theta, birth accounting, first-step Poisson transmission, no same-step newborn transmission, symptom and quarantine cascades, dynamic array growth, resource limits, and SVG export.
+With zero isolation efficacy, a test verifies identical seeded incidence with tracing on and off.
+These are algorithm checks, not a claim that Figure 3 has been reproduced.
+
+Before interpreting a critical boundary, also check:
 
 1. With tracing off, recover Equation 6 for both variances and all three isolation efficacies within Monte Carlo uncertainty.
-2. With no interventions, recover a mean of $R_0$ lifetime infections per case, allowing for numerical error in the timestep sum of $\beta(\tau)\delta$.
-3. With zero isolation efficacy and no initially quarantined people, tracing must have no effect: nobody can initiate it.
-   The independent analytical approximation need not satisfy this realistic-model check.
-4. With exponential distributions (shape 1) and perfect isolation, compare the realistic simulation's thresholds to corrected Equation 18, where the paper reports agreement.
-   At imperfect isolation, do not require the realistic simulation to match this independent approximation.
-   No Equation 16 solver is needed; gamma cases retain the isolation-only benchmark from item 1.
-5. Refine timestep, lengthen horizon, vary fitting windows, and increase seeds and replicates.
+1. With exponential distributions (shape 1) and perfect isolation, compare the realistic simulation's thresholds to corrected Equation 18, where the paper reports agreement.
+1. Refine timestep, lengthen horizon, vary fitting windows, and increase seeds and replicates.
    Require changes small compared with reported uncertainty; check ambiguous same-step conventions separately.
-6. Test a hand-built tree: quarantining a presymptomatic child blocks its transmission but does not trace its children until symptoms.
-   Each eligible person traces at most once.
-
-Only after these checks should simulated gamma curves accompany the current deterministic exponential example.

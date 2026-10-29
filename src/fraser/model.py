@@ -5,7 +5,7 @@ from scipy.special import betaincinv
 
 def isolation_threshold(theta: float, isolation: float) -> float:
     """Critical R0 from Equation 6; control requires R0 below it."""
-    return 1 - isolation + isolation * theta
+    return 1 / (1 - isolation + isolation * theta)
 
 
 def exponential_threshold(theta: float, isolation: float, tracing: float) -> float:

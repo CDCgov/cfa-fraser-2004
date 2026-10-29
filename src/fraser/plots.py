@@ -53,9 +53,6 @@ def deterministic_chart() -> alt.VConcatChart:
                 }
             )
         records.extend({"theta": 1, "r0": 1, "method": method} for method in methods)
-        at_zero = isolation_threshold(0, isolation)
-        if math.isfinite(at_zero):
-            records.append({"theta": 0, "r0": at_zero, "method": methods[0]})
         lines = (
             alt.Chart(alt.Data(values=records))
             .mark_line(clip=True)

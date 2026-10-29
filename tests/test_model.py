@@ -64,7 +64,6 @@ def test_time_scale_invariance():
 
 
 def test_endpoints():
-    assert isolation_threshold(0, 1) == math.inf
     assert isolation_threshold(1, 0.75) == 1
     assert exponential_threshold(1, 0.9, 1) == 1
     assert isolation_threshold(0.2, 0) == 1

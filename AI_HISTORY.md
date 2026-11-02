@@ -1,5 +1,24 @@
 # AI History
 
+## 2026-11-02
+
+- **Task completed**: Refactored `CriticalResult` to package its `SearchParameters`, matching `SimulationResult` and avoiding duplicated input fields.
+
+- **Task completed**: Split configuration into shared `CommonParameters`, `SimulationParameters` with R0, and `SearchParameters` with search bounds and repetitions.
+  The critical-R0 search now accepts only `SearchParameters` and creates candidate simulations from its shared configuration.
+
+- **Task completed**: Made `find_critical_r0` require a `SimulationParameters` instance and use its simulation settings directly, eliminating duplicated arguments.
+
+- **Task completed**: Removed the redundant module-level `binned_incidence` wrapper.
+  Critical-R0 estimation now invokes `SimulationResult.binned_incidence()` directly, and its tests use a result-shaped test double.
+
+## 2026-11-02
+
+- **Task completed**: Debugged the post-refactor simulation and plotting regressions.
+  Restored the module-level incidence-binning API, normalized partial bins by their actual duration, retained compatibility with scalar and `SimulationParameters` simulation/search calls, and advanced independent random streams across threshold evaluations.
+  Corrected regression assertions to match the documented exclusion of seed infections from incidence and fixed the critical-plot bracket fixture.
+  Validation: 88 tests passed.
+
 ## 2026-10-29
 
 - **Task completed**: Implemented deterministic outbreak-control thresholds from Fraser et al. (2004), including the isolation-only curves and Equation 16 tracing approximation.

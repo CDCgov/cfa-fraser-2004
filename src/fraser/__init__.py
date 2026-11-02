@@ -12,9 +12,11 @@ from fraser.model import (
     isolation_threshold,
 )
 from fraser.simulation import (
+    CommonParameters,
     CriticalResult,
+    SearchParameters,
+    SimulationParameters,
     SimulationResult,
-    binned_incidence,
     estimate_growth,
     find_critical_r0,
     presymptomatic_fraction,
@@ -26,9 +28,11 @@ __all__ = [
     "gamma_parameters",
     "isolation_threshold",
     "SimulationResult",
+    "SimulationParameters",
+    "CommonParameters",
+    "SearchParameters",
     "presymptomatic_fraction",
     "simulate",
-    "binned_incidence",
     "estimate_growth",
     "CriticalResult",
     "find_critical_r0",
@@ -78,9 +82,10 @@ def _critical_figures(output_dir: Path) -> None:
             theta, variance_ratio=1 / shape, generation_time=1
         )
         symptom_mean = shape * incubation_scale
-        result = find_critical_r0(
-            symptom_mean,
-            shape,
+
+        search_parameters = SearchParameters(
+            symptom_mean=symptom_mean,
+            shape=shape,
             isolation=isolation,
             tracing=parameters["tracing"],
             initial_infections=parameters["initial_infections"],
@@ -91,6 +96,7 @@ def _critical_figures(output_dir: Path) -> None:
             seed=int(stream.generate_state(1)[0]),
             **SEARCH_SETTINGS,
         )
+        result = find_critical_r0(search_parameters)
         results.append(result)
         detail = (
             f"R0={result.estimate:.2f} [{result.lower:.2f}, {result.upper:.2f}]"

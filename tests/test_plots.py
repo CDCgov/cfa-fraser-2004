@@ -7,14 +7,41 @@ from fraser import main
 from fraser.plots import (
     critical_chart,
 )
-from fraser.simulation import CriticalResult
+from fraser.simulation import CriticalResult, SearchParameters
+
+
+def search_parameters(theta, isolation=0.9, tracing=1, shape=2):
+    _, _, scale = fraser.gamma_parameters(
+        theta, variance_ratio=1 / shape, generation_time=1
+    )
+    return SearchParameters(
+        symptom_mean=shape * scale,
+        shape=shape,
+        isolation=isolation,
+        tracing=tracing,
+    )
 
 
 def test_critical_svg_and_out_of_range_markers(tmp_path):
     results = [
-        CriticalResult(1, 2, 0.9, 1, 0.5, 3.5, 3.7, "bracketed", []),
-        CriticalResult(0.5, 2, 0.9, 1, 0.2, 1, 15, "above_range", []),
-        CriticalResult(2, 2, 0.9, 1, 0.8, 1, 15, "unresolved", []),
+        CriticalResult(
+            parameters=search_parameters(0.5),
+            lower=3.5,
+            upper=3.7,
+            status="bracketed",
+        ),
+        CriticalResult(
+            parameters=search_parameters(0.2),
+            lower=1,
+            upper=15,
+            status="above_range",
+        ),
+        CriticalResult(
+            parameters=search_parameters(0.8),
+            lower=1,
+            upper=15,
+            status="unresolved",
+        ),
     ]
     chart = critical_chart(results)
     path = tmp_path / "critical.svg"
@@ -36,7 +63,12 @@ def test_critical_svg_and_out_of_range_markers(tmp_path):
 
 
 def test_combined_isolation_reference():
-    result = CriticalResult(1, 2, 0.9, 0, 0.5, 1.7, 1.9, "bracketed", [])
+    result = CriticalResult(
+        parameters=search_parameters(0.5),
+        lower=1.7,
+        upper=1.9,
+        status="bracketed",
+    )
     records = critical_chart([result]).to_dict()["data"]["values"]
     reference = next(
         record
@@ -48,7 +80,12 @@ def test_combined_isolation_reference():
 
 def test_efficacy_panels_have_both_gamma_shapes_and_both_references():
     results = [
-        CriticalResult(1, shape, isolation, 1, 0.5, 3, 3.5, "bracketed", [])
+        CriticalResult(
+            parameters=search_parameters(0.5, isolation=isolation, shape=shape),
+            lower=3,
+            upper=3.5,
+            status="bracketed",
+        )
         for isolation in [1, 0.9, 0.75]
         for shape in [2, 10]
     ]
@@ -92,18 +129,13 @@ def test_critical_command(tmp_path, monkeypatch, theta, shape):
     )
     calls = []
 
-    def fake_search(symptom_mean, shape, **kwargs):
-        calls.append((symptom_mean, shape, kwargs["isolation"], kwargs["tracing"]))
+    def fake_search(base_parameters, **kwargs):
+        calls.append(base_parameters)
         return CriticalResult(
-            symptom_mean,
-            shape,
-            kwargs["isolation"],
-            kwargs["tracing"],
-            fraser.presymptomatic_fraction(symptom_mean, shape),
-            3.5,
-            3.7,
-            "bracketed",
-            [],
+            parameters=base_parameters,
+            lower=3.5,
+            upper=3.7,
+            status="bracketed",
         )
 
     monkeypatch.setattr(
@@ -115,6 +147,14 @@ def test_critical_command(tmp_path, monkeypatch, theta, shape):
     main()
     assert [path.name for path in tmp_path.iterdir()] == ["control.svg"]
     assert len(calls) == 1
-    symptom_mean, actual_shape, isolation, tracing = calls[0]
-    assert (actual_shape, isolation, tracing) == (shape, 0.9, 1)
-    assert fraser.presymptomatic_fraction(symptom_mean, shape) == pytest.approx(theta)
+    base_parameters = calls[0]
+    assert (
+        base_parameters.shape,
+        base_parameters.isolation,
+        base_parameters.tracing,
+    ) == (
+        shape,
+        0.9,
+        1,
+    )
+    assert base_parameters.theta == pytest.approx(theta)

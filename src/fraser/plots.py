@@ -31,7 +31,7 @@ DISEASE_RANGES = [
 
 def critical_chart(results: list[CriticalResult]) -> alt.FacetChart:
     """Show simulated thresholds, analytical references, and historical ranges."""
-    shapes = sorted({result.shape for result in results}, reverse=True)
+    shapes = sorted({result.parameters.shape for result in results}, reverse=True)
     series = (
         ["Isolation only (Eq. 6)"]
         + [f"Tracing (k={shape:g})" for shape in shapes]
@@ -51,18 +51,18 @@ def critical_chart(results: list[CriticalResult]) -> alt.FacetChart:
             value = result.lower
         records.append(
             {
-                "theta": result.theta,
+                "theta": result.parameters.theta,
                 "r0": value if math.isfinite(value) else None,
                 "lower": result.lower,
                 "upper": result.upper,
-                "efficacy": f"Isolation {result.isolation:.0%}",
-                "series": f"Tracing (k={result.shape:g})",
+                "efficacy": f"Isolation {result.parameters.isolation:.0%}",
+                "series": f"Tracing (k={result.parameters.shape:g})",
                 "status": result.status,
                 "source": "Simulation",
             }
         )
     for isolation, tracing in sorted(
-        {(result.isolation, result.tracing) for result in results}
+        {(result.parameters.isolation, result.parameters.tracing) for result in results}
     ):
         for theta in np.linspace(0.01, 1, 100):
             for name, value in [
@@ -82,7 +82,7 @@ def critical_chart(results: list[CriticalResult]) -> alt.FacetChart:
                         "source": "Deterministic",
                     }
                 )
-    for isolation in sorted({result.isolation for result in results}):
+    for isolation in sorted({result.parameters.isolation for result in results}):
         for disease in DISEASE_RANGES:
             records.append(
                 {
@@ -198,7 +198,8 @@ def critical_chart(results: list[CriticalResult]) -> alt.FacetChart:
                 sort=[
                     f"Isolation {value:.0%}"
                     for value in sorted(
-                        {result.isolation for result in results}, reverse=True
+                        {result.parameters.isolation for result in results},
+                        reverse=True,
                     )
                 ],
                 header=alt.Header(labelAngle=0),

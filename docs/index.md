@@ -5,9 +5,8 @@ Run `uv run fraser` to search for critical R0 values and write the combined Alta
 
 ![Outbreak-control thresholds](figures/control.svg)
 
-Panels show isolation efficacy 100%, 90%, and 75%.
-Blue/red curves simulate tracing for gamma shapes 10/2; bars show bisection brackets, not confidence intervals.
 Black is the exact isolation-only result (Equation 6); dashed gray is the exponential reference (corrected Equation 18).
 Gray rectangles show historical disease ranges.
+Vertical bars show bisection brackets, not confidence intervals.
 
 See the [simulation methods](simulation.md) and [deterministic derivation and typo note](deterministic.md).
